@@ -1,0 +1,101 @@
+# API
+
+GCP offers a variety of API, the biggest hurdle I came across is making OAuth working.   
+OAuth explained: https://developers.google.com/api-client-library/python/guide/aaa_oauth .  
+As a beginner programmer, I'd rather explore the API using some tool (I used Postman in the past) and eventually code what I need.
+There is an official API explorer, but it isn't as sleak as the above mentioned tools: https://developers.google.com/apis-explorer/
+
+The official documentaion is a good starting point: https://developers.google.com/identity/protocols/OAuth2
+
+## Web server app (working)
+The easisest path is covered in the Web app scenario.
+I've tried with both Postman and Paw, but only managed to have it working in the latter (postman seems to be broken)
+Here are the steps needed to have OAuth working.
+It tooke me a while to figure it out...
+
+1- create a OAuth credential: 
+navigate to __API & Services__ -> __Credentials__ -> __Create Credentials__ and select __OAuth client ID__.
+**Important:** you  **MUST** define an **Authorized redirect URIs** even if you won't use it.
+I've used **http://127.0.0.1**
+
+2- dowload the json file
+
+3- in Paw (/Postman, but it won't work), you'll have to fill in the following informations, most are included in the json file:
+
+ **Grant type:** (autorization code)  
+ **Client ID:** (see json file)   
+ **Client secret:** (see json file)   
+ **Authorization URL:** https://accounts.google.com/o/oauth2/auth   
+ **Access Token URL:** https://accounts.google.com/o/oauth2/token   
+ **Redirect URL:** http://127.0.0.1 (or anything else you have defined in 1)   
+ **Scope**: https://www.googleapis.com/auth/cloud-platform
+ 
+ Note: the scope I have been using works for *most* of the API, the full list of scopes is documented here https://developers.google.com/identity/protocols/googlescopes
+
+## Service Account
+The downside of the WebApp path is that you'll have to log in google to get the token, which can be annoying.
+The solution is using service accounts.
+Again, the starting point is the official documentation: https://developers.google.com/identity/protocols/OAuth2ServiceAccount
+
+1- Create a service account in console   
+  * Go to **IAM and admin** -> **Service accounts** -> **+ Create service account**
+  * Assign a role
+  * go to **API and services** -> **Credentials** and select **Create service account key**
+  * select the service account created in the previous step
+
+Here the path seems to divert whether you are using the WEB API (curl and similar) or python API.
+The python API most likely are a wrapper around the WEB api, which is great, but defeats the purpose of what I am trying to do so I will go the hard way and understand how to call API from native web tools and eventually move to python.
+
+2- Prepare the credential 
+You need to create a jwt out of the private key json file.
+The python code below will do:
+```
+#!/usr/bin/python2
+
+import jwt
+import json
+import time
+
+path_to_service_account = <path to json file>
+
+with open(path_to_service_account) as f:
+    service_account = json.load(f)
+
+payload= {
+#  "iss": <account email address>,
+  "scope":u"https://www.googleapis.com/auth/cloud-platform",
+  "aud":u"https://www.googleapis.com/oauth2/v4/token",
+#  "exp": <expiration (epoch)>,
+#  "iat":<valid from (epoch)>
+}
+
+payload['iss'] = service_account[u'client_email']
+iat = int(time.time())
+payload['iat'] = iat
+payload['exp'] = iat + 3600
+
+private_key = service_account[u'private_key']
+
+jwt = jwt.encode(payload, key=private_key, algorithm='RS256')
+print jwt
+```
+
+3- get the token   
+Once the JWT has been generated, you have to make a POST request to https://www.googleapis.com/oauth2/v4/token to get the token.
+
+Here are the parameters to add in the post:
+```
+POST
+Content-Type: application/x-www-form-urlencoded
+Body:
+grant_type: urn:ietf:params:oauth:grant-type:jwt-bearer
+assertion: the JWT obtained before
+```
+
+Example: using curl:   
+`curl -d "grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Ajwt-bearer&assertion=$jwt" https://www.googleapis.com/oauth2/v4/token`
+
+4- call the API   
+With the token in our hands, this is just a normal API request.
+In the header, you must add:   
+`Authorization: Bearer <access_token>`
